@@ -84,6 +84,7 @@ export default function MovePage() {
     addCompletedMove,
     setCurrentAction,
     setLatestResponse,
+    latestResponse,
   } = usePraxism();
 
   const currentAction = context.currentAction;
@@ -93,6 +94,7 @@ export default function MovePage() {
   // Help State
   const [helpInput, setHelpInput] = useState("");
   const [isAskingHelp, setIsAskingHelp] = useState(false);
+  const [isHelping, setIsHelping] = useState(false);
   const [helpResponse, setHelpResponse] = useState<string | null>(null);
   const [helpError, setHelpError] = useState<string | null>(null);
 
@@ -102,16 +104,67 @@ export default function MovePage() {
   const [outcomeNotes, setOutcomeNotes] = useState("");
   const [isSubmittingOutcome, setIsSubmittingOutcome] = useState(false);
   const [outcomeError, setOutcomeError] = useState<string | null>(null);
+  const [outcomeMessage, setOutcomeMessage] = useState<string | null>(() => {
+    if (latestResponse?.message && latestResponse.message.startsWith("What we learned")) {
+      return latestResponse.message;
+    }
+    return null;
+  });
 
   useEffect(() => {
     document.title = "Your next move — Praxism";
   }, []);
 
+  // Handle "Help me do it" button
+  const handleHelpMeDoIt = async () => {
+    if (isHelping || isAskingHelp) return;
+
+    setHelpError(null);
+    setIsHelping(true);
+
+    try {
+      const currentSessionId = sessionId || "session_default";
+      const res = await api.next({
+        sessionId: currentSessionId,
+        context,
+        message: "Help me do this",
+      });
+
+      setLatestResponse(res);
+
+      if (res.action) {
+        const newMaterials = res.action.materials || [];
+        const existing = currentAction?.materials || [];
+        const existingIds = new Set(newMaterials.map((m) => m.id));
+        const merged = [
+          ...existing.filter((m) => !existingIds.has(m.id)),
+          ...newMaterials,
+        ];
+        setCurrentAction({
+          ...res.action,
+          materials: merged.length > 0 ? merged : newMaterials,
+        });
+        setCardRevision((prev) => prev + 1);
+      }
+      if (res.message) {
+        setHelpResponse(res.message);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Could not retrieve help materials. Please try again.";
+      setHelpError(message);
+    } finally {
+      setIsHelping(false);
+    }
+  };
+
   // Handle Help Request
   const handleAskHelp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const query = helpInput.trim();
-    if (!query || isAskingHelp) return;
+    if (!query || isAskingHelp || isHelping) return;
 
     setHelpError(null);
     setIsAskingHelp(true);
@@ -172,6 +225,7 @@ export default function MovePage() {
         setCurrentAction(res.action);
       }
       setLatestResponse(res);
+      setOutcomeMessage(res.message || null);
 
       setSelectedOutcome(null);
       setOutcomeNotes("");
@@ -225,6 +279,18 @@ export default function MovePage() {
 
   return (
     <div className="space-y-10 pb-20">
+      {/* Learned Message from Outcome */}
+      {outcomeMessage && (
+        <section className="p-5 rounded-lg bg-slate border border-rule space-y-2">
+          <h2 className="text-base font-bold text-bone font-heading">
+            What we learned
+          </h2>
+          <p className="text-ash text-sm leading-relaxed">
+            {outcomeMessage}
+          </p>
+        </section>
+      )}
+
       {/* 1. Next Move Card: The only bone-colored block on the page */}
       <FadeContent
         trigger="mount"
@@ -311,23 +377,53 @@ export default function MovePage() {
             </p>
           </div>
 
+          <div>
+            <button
+              type="button"
+              onClick={handleHelpMeDoIt}
+              disabled={isHelping || isAskingHelp}
+              className="px-4 py-2 bg-bone text-graphite rounded font-medium text-sm transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed select-none"
+            >
+              Help me do it
+            </button>
+          </div>
+
           <form onSubmit={handleAskHelp} className="flex gap-2">
             <input
               type="text"
               placeholder="Ask a question about this move..."
               value={helpInput}
               onChange={(e) => setHelpInput(e.target.value)}
-              disabled={isAskingHelp}
+              disabled={isAskingHelp || isHelping}
               className="flex-1 bg-graphite border border-rule rounded px-3.5 py-2 text-sm text-bone placeholder:text-ash focus:outline-none focus:border-ash transition-colors disabled:opacity-60"
             />
             <button
               type="submit"
-              disabled={!helpInput.trim() || isAskingHelp}
+              disabled={!helpInput.trim() || isAskingHelp || isHelping}
               className="px-4 py-2 bg-bone text-graphite rounded font-medium text-sm transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0 select-none"
             >
               Ask
             </button>
           </form>
+
+          {isHelping && (
+            <div className="p-4 rounded bg-graphite border border-rule flex items-center justify-center">
+              <TextType
+                text={[
+                  "Drafting execution materials",
+                  "Creating templates and guides",
+                ]}
+                typingSpeed={40}
+                pauseDuration={1500}
+                deletingSpeed={25}
+                loop={true}
+                showCursor={true}
+                cursorCharacter="|"
+                className="text-bone text-sm font-medium"
+                cursorClassName="text-bone"
+              />
+            </div>
+          )}
 
           {isAskingHelp && (
             <div className="p-4 rounded bg-graphite border border-rule flex items-center justify-center">
@@ -348,21 +444,23 @@ export default function MovePage() {
             </div>
           )}
 
-          {helpResponse && !isAskingHelp && (
+          {helpResponse && !isAskingHelp && !isHelping && (
             <div className="p-4 rounded bg-graphite border border-rule space-y-1">
               <p className="text-bone text-sm leading-relaxed">{helpResponse}</p>
             </div>
           )}
 
-          {helpError && !isAskingHelp && (
+          {helpError && !isAskingHelp && !isHelping && (
             <div className="p-4 rounded bg-graphite border border-rule space-y-2">
               <p className="text-bone text-sm">{helpError}</p>
               <button
                 type="button"
-                onClick={() => handleAskHelp()}
+                onClick={() => {
+                  setHelpError(null);
+                }}
                 className="px-3 py-1 bg-bone text-graphite rounded text-xs font-medium hover:opacity-90 transition-opacity"
               >
-                Try again
+                Dismiss
               </button>
             </div>
           )}
