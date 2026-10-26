@@ -1,16 +1,14 @@
 import type {
-  PlanRequest,
-  PlanResponse,
-  BlockerRequest,
-  BlockerResponse,
-  ChatRequest,
-  HistoryEntry,
+  StartRequest,
+  NextRequest,
+  CompleteRequest,
+  HealthResponse,
+  AgentResponse,
 } from "../types";
 
 export interface ApiClient {
-  getPlan(req: PlanRequest): Promise<PlanResponse>;
-  reportBlocker(req: BlockerRequest): Promise<BlockerResponse>;
-  streamChat(req: ChatRequest): AsyncIterable<string>;
-  getHistory(): Promise<HistoryEntry[]>;
-  addHistory(entry: HistoryEntry): Promise<void>;
+  health(): Promise<HealthResponse>;
+  start(req: StartRequest): Promise<AgentResponse>;
+  next(req: NextRequest): Promise<AgentResponse>;
+  complete(req: CompleteRequest): Promise<AgentResponse>;
 }

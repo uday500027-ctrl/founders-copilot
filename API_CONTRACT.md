@@ -1,390 +1,293 @@
-# API Contract: Founder Copilot
+# Praxism API Contract
 
-This document specifies the HTTP API interface between the Next.js frontend and the backend service (default base URL: `http://localhost:8000`).
+This document specifies the HTTP API interface between the Next.js frontend and the Ollama backend service (endpoints located under `frontend/src/app/api/`).
+
+All data structures match [`frontend/src/lib/types.ts`](file:///c:/founder-copilot/frontend/src/lib/types.ts) exactly.
 
 ---
 
-## 1. Global Specifications
+## 1. Backend Architecture & Implementation Guidelines
 
-### Headers
-- **Content-Type**: `application/json` (unless streaming plain text, as in `POST /chat`)
-- **Accept**: `application/json` (or `text/plain` for `/chat`)
-
-### Standard Error Format
-All non-2xx responses MUST return a JSON payload with an `error` string:
-
-```json
-{
-  "error": "Descriptive error message indicating reason for failure"
-}
-```
-
-HTTP Status Codes:
-- `400 Bad Request`: Payload validation failure or missing mandatory fields.
-- `404 Not Found`: Requested resource or entity does not exist.
-- `422 Unprocessable Entity`: Business logic failure or inability to generate plan.
-- `500 Internal Server Error`: Backend error or unhandled model exception.
+1. **Stateless Operations**: Every stateful request (`/agent/next` and `/agent/complete`) carries the complete `SessionContext` (`idea`, `answers`, `history`, `currentAction`). The backend MUST remain completely stateless so it can run seamlessly on Vercel Serverless / Edge Functions without a database or server-side session cache.
+2. **Clarification Over Hallucination**: If the user's idea lacks essential context (e.g., target customer, budget, current progress), the agent MUST return `status: "needs_clarification"` with targeted `ClarificationQuestion[]` rather than inventing assumptions.
+3. **Server-Side Secrets**: The Ollama API URL or key MUST remain strictly server-side (e.g. `OLLAMA_API_URL`, `OLLAMA_API_KEY`). NEVER prefix backend credentials with `NEXT_PUBLIC_` or expose them to client bundles.
+4. **Error Handling**: All non-2xx responses MUST return a JSON payload with an `error` string and standard HTTP status codes (4xx/5xx):
+   ```json
+   {
+     "error": "Descriptive explanation of the error"
+   }
+   ```
+5. **Execution Timeout**: Frontend HTTP clients enforce a 60-second AbortController timeout. Backend routes must respond within this window.
 
 ---
 
 ## 2. Endpoints
 
-### 2.1 Generate Next Action Plan
-Determines the ONE highest-leverage next action for a founder and returns prioritized queue items.
-
-- **Method**: `POST`
-- **Path**: `/plan`
-- **Headers**: `Content-Type: application/json`
-
-#### Request JSON (`PlanRequest`)
-```json
-{
-  "profile": {
-    "name": "Alex Vance",
-    "startupName": "NovaSync",
-    "oneLiner": "Automated compliance reconciliation for B2B SaaS teams",
-    "stage": "mvp",
-    "industry": "B2B SaaS / FinTech",
-    "teamSize": 2,
-    "hoursPerWeek": 50,
-    "goal90Days": "Secure 3 signed pilot customers at $500/mo",
-    "constraints": ["Bootstrapped budget", "No dedicated legal counsel"]
-  },
-  "tasks": [
-    {
-      "id": "task_1",
-      "title": "Cold outreach to 15 design partners on LinkedIn",
-      "notes": "Target VP of Operations at Series A startups",
-      "status": "todo",
-      "createdAt": "2026-10-25T10:00:00.000Z"
-    },
-    {
-      "id": "task_2",
-      "title": "Implement Stripe Checkout webhook for self-serve onboarding",
-      "status": "todo",
-      "createdAt": "2026-10-25T10:05:00.000Z"
-    }
-  ],
-  "skippedTaskIds": ["task_old_archived"]
-}
-```
-
-Field Specifications:
-- `profile.stage`: Enum `"idea"` | `"mvp"` | `"early_revenue"` | `"scaling"`
-- `tasks[].status`: Enum `"todo"` | `"doing"` | `"done"` | `"blocked"`
-- `skippedTaskIds`: Optional array of task IDs to exclude from consideration.
-
-#### Response JSON (`PlanResponse`) - `200 OK`
-```json
-{
-  "nextAction": {
-    "taskId": "task_1",
-    "title": "Cold outreach to 15 design partners on LinkedIn",
-    "whyNow": "This is the single most critical bottleneck for NovaSync at the MVP stage. Resolving this unlocks customer traction and validates product-market demand before committing engineering resources.",
-    "when": {
-      "slot": "Tomorrow Morning (9:30 AM - 11:00 AM)",
-      "estimatedMinutes": 90,
-      "deadline": "2026-10-27"
-    },
-    "where": "CRM & LinkedIn Sales Navigator",
-    "steps": [
-      "Filter VP of Operations in B2B SaaS companies with 20-100 employees.",
-      "Send tailored 3-sentence connection notes focusing on current manual invoice reconciliation pain.",
-      "Log conversation threads and scheduling links in central outreach tracker."
-    ],
-    "resources": [
-      {
-        "label": "B2B Outreach Playbook & Copy Templates",
-        "url": "https://templates.example.com/b2b-outreach",
-        "type": "template"
-      },
-      {
-        "label": "LinkedIn Sales Navigator",
-        "url": "https://linkedin.com",
-        "type": "tool"
-      }
-    ],
-    "contacts": [
-      {
-        "role": "GTM Advisor",
-        "why": "Review reply and conversion rates on initial messaging sequence.",
-        "howToReach": "Slack #advisors channel or weekly sync."
-      }
-    ]
-  },
-  "queue": [
-    {
-      "taskId": "task_2",
-      "title": "Implement Stripe Checkout webhook for self-serve onboarding",
-      "priority": 2,
-      "reason": "Queued directly behind customer discovery validation."
-    }
-  ]
-}
-```
-
-Field Specifications:
-- `nextAction.resources[].type`: Enum `"tool"` | `"template"` | `"article"` | `"video"` | `"community"`
-- `queue[].priority`: Integer `1` | `2` | `3` | `4` | `5`
-
----
-
-### 2.2 Report Blocker
-Analyzes a founder's operational or technical blocker on a task and returns actionable suggestions, relevant advisors/contacts, and an alternative unblocking action.
-
-- **Method**: `POST`
-- **Path**: `/blocker`
-- **Headers**: `Content-Type: application/json`
-
-#### Request JSON (`BlockerRequest`)
-```json
-{
-  "profile": {
-    "name": "Alex Vance",
-    "startupName": "NovaSync",
-    "oneLiner": "Automated compliance reconciliation for B2B SaaS teams",
-    "stage": "mvp",
-    "industry": "B2B SaaS / FinTech",
-    "teamSize": 2,
-    "hoursPerWeek": 50,
-    "goal90Days": "Secure 3 signed pilot customers at $500/mo",
-    "constraints": ["Bootstrapped budget"]
-  },
-  "taskId": "task_1",
-  "description": "Prospective pilot clients are demanding SOC2 Type II certification before connecting test databases."
-}
-```
-
-#### Response JSON (`BlockerResponse`) - `200 OK`
-```json
-{
-  "suggestions": [
-    "Deconstruct the blocker: offer a zero-PII synthetic sandbox environment or anonymized dummy dataset to pilot test the value prop without SOC2.",
-    "Share a vendor security whitepaper and third-party code audit summary in lieu of full SOC2 for the duration of the 30-day proof of concept.",
-    "Shift focus to prospective clients in non-regulated sectors who do not have mandatory SOC2 procurement gates."
-  ],
-  "contacts": [
-    {
-      "role": "Specialist Tech Lead / Domain Advisor",
-      "why": "Review architectural workarounds and evaluate whether synthetic data generators can bypass customer compliance barriers.",
-      "howToReach": "Founder Slack #security-advisors or scheduled 1:1."
-    },
-    {
-      "role": "Startup Attorney / Legal Counsel",
-      "why": "Draft a lightweight Pilot Agreement with standard confidentiality and indemnification caps.",
-      "howToReach": "Schedule emergency legal consultation via firm retainer portal."
-    }
-  ],
-  "alternativeAction": {
-    "taskId": "alt_task_1",
-    "title": "Target non-regulated SMB prospects who do not require SOC2 for initial pilots",
-    "whyNow": "Keeps customer acquisition momentum active and generates qualitative feedback without waiting on blocked dependencies.",
-    "when": {
-      "slot": "Immediate 60-min Focus Block",
-      "estimatedMinutes": 60
-    },
-    "where": "Notion / CRM",
-    "steps": [
-      "Adjust ICP search criteria to teams under 40 employees.",
-      "Reach out to 8 founders directly via email with personalized demo invite."
-    ],
-    "resources": [
-      {
-        "label": "Pilot Agreement Template",
-        "type": "template",
-        "url": "https://templates.example.com/pilot-agreement"
-      }
-    ],
-    "contacts": [
-      {
-        "role": "Peer Founder in Same Batch",
-        "why": "Compare notes on early enterprise pilot terms without formal certifications.",
-        "howToReach": "Post query in founder community group chat."
-      }
-    ]
-  }
-}
-```
-
----
-
-### 2.3 Stream Chat Assistant
-Streams founder coaching responses chunk by chunk using a streaming plain text response.
-
-- **Method**: `POST`
-- **Path**: `/chat`
-- **Headers**:
-  - Request: `Content-Type: application/json`
-  - Response: `Content-Type: text/plain; charset=utf-8`
-
-#### Request JSON (`ChatRequest`)
-```json
-{
-  "profile": {
-    "name": "Alex Vance",
-    "startupName": "NovaSync",
-    "oneLiner": "Automated compliance reconciliation for B2B SaaS teams",
-    "stage": "mvp",
-    "industry": "B2B SaaS / FinTech",
-    "teamSize": 2,
-    "hoursPerWeek": 50,
-    "goal90Days": "Secure 3 signed pilot customers at $500/mo",
-    "constraints": ["Bootstrapped budget"]
-  },
-  "currentAction": {
-    "taskId": "task_1",
-    "title": "Cold outreach to 15 design partners on LinkedIn",
-    "whyNow": "Securing 3 committed pilot users is required before finalizing Q4 MVP scope.",
-    "when": {
-      "slot": "Morning Sprint",
-      "estimatedMinutes": 90
-    },
-    "where": "LinkedIn Sales Navigator & CRM",
-    "steps": [
-      "Filter VP of Operations in B2B SaaS companies",
-      "Send personalized connection notes"
-    ],
-    "resources": [],
-    "contacts": []
-  },
-  "messages": [
-    {
-      "role": "user",
-      "content": "How should I structure my cold message so it doesn't sound spammy?"
-    }
-  ]
-}
-```
-
-#### Response Stream - `200 OK`
-- The response body is a readable stream yielding plain text UTF-8 chunks as they are generated by the model.
-- Example stream output:
-```text
-Focusing on customer distribution before product polish is the single highest leverage choice today...
-```
-
----
-
-### 2.4 Get Action History
-Retrieves all completed or logged historical actions.
+### 2.1 Health Check
+Verifies connectivity with the backend and local Ollama model instance.
 
 - **Method**: `GET`
-- **Path**: `/history`
-- **Headers**: `Accept: application/json`
+- **Path**: `${API_URL}/health` (default: `/api/health`)
 
-#### Response JSON (`HistoryEntry[]`) - `200 OK`
+#### Response JSON (`HealthResponse`) - `200 OK`
 ```json
-[
-  {
-    "id": "hist_1",
-    "taskId": "task_hist_1",
-    "title": "Cold outreach to 15 design partners on LinkedIn",
-    "outcome": "done",
-    "completedAt": "2026-10-25T11:00:00.000Z",
-    "note": "Sent all 15 personalized connection requests; 4 accepted within 24 hours, 2 scheduled discovery calls.",
-    "action": {
-      "taskId": "task_hist_1",
-      "title": "Cold outreach to 15 design partners on LinkedIn",
-      "whyNow": "Securing 3 committed pilot users is required before finalizing the Q4 MVP scope.",
-      "when": {
-        "slot": "Morning Sprint (9:00 AM - 10:30 AM)",
-        "estimatedMinutes": 90,
-        "deadline": "2026-10-25"
-      },
-      "where": "LinkedIn Sales Navigator & CRM",
-      "steps": [
-        "Filter VP of Operations in B2B SaaS companies with 20-100 employees.",
-        "Send personalized 3-sentence connection notes focusing on current manual invoice reconciliation pain.",
-        "Log replies and scheduling links in Notion outreach tracker."
-      ],
-      "resources": [
-        {
-          "label": "B2B Outreach Playbook & Copy Templates",
-          "url": "https://templates.example.com/b2b-outreach",
-          "type": "template"
-        }
-      ],
-      "contacts": [
-        {
-          "role": "GTM Advisor",
-          "why": "Review open and reply rates on initial message sequence.",
-          "howToReach": "Slack #advisors channel or weekly sync."
-        }
-      ]
-    }
-  }
-]
+{
+  "ok": true,
+  "model": "llama3.2"
+}
 ```
-
-Field Specifications:
-- `outcome`: Enum `"done"` | `"skipped"`
-- `completedAt`: ISO 8601 date string.
-- `action`: Snapshot of the `NextAction` that was followed.
-- `note`: Optional freeform founder note.
 
 ---
 
-### 2.5 Add Action History Entry
-Persists a newly completed or resolved next action into history.
+### 2.2 Start Journey
+Initializes the core loop with the user's founder idea.
 
 - **Method**: `POST`
-- **Path**: `/history`
+- **Path**: `${API_URL}/agent/start`
 - **Headers**: `Content-Type: application/json`
 
-#### Request JSON (`HistoryEntry`)
+#### Request JSON (`StartRequest`)
 ```json
 {
-  "id": "hist_2",
-  "taskId": "task_2",
-  "title": "Implement Stripe Checkout webhook for self-serve onboarding",
-  "outcome": "done",
-  "completedAt": "2026-10-26T14:00:00.000Z",
-  "note": "Webhook deployed and tested with test cards; subscriptions provisioning cleanly.",
-  "action": {
-    "taskId": "task_2",
-    "title": "Implement Stripe Checkout webhook for self-serve onboarding",
-    "whyNow": "Users are dropping off because billing activation requires manual admin intervention.",
-    "when": {
-      "slot": "Afternoon Deep Work (2:00 PM - 4:00 PM)",
-      "estimatedMinutes": 120
+  "idea": "I want to start a clothing brand, but I don't know where to begin"
+}
+```
+
+#### Response JSON (`AgentResponse`) - `200 OK` (Needs Clarification)
+```json
+{
+  "sessionId": "session_clothing_demo",
+  "status": "needs_clarification",
+  "stage": "idea",
+  "blocker": "Unclear target customer segment and initial budget allocation",
+  "questions": [
+    {
+      "id": "q_budget",
+      "question": "What is your initial budget for testing this clothing brand?",
+      "options": [
+        "Under ₹10,000",
+        "₹10,000 – ₹50,000",
+        "₹50,000 – ₹2,00,000",
+        "₹2,00,000+"
+      ]
     },
-    "where": "Backend API & Stripe Developer Dashboard",
-    "steps": [
-      "Configure Stripe checkout.session.completed webhook endpoint in API router.",
-      "Verify webhook signature with STRIPE_WEBHOOK_SECRET.",
-      "Provision workspace subscription record in PostgreSQL."
-    ],
-    "resources": [
+    {
+      "id": "q_customer",
+      "question": "Who is your ideal customer, and what specific aesthetic or problem in their wardrobe are you addressing?"
+    },
+    {
+      "id": "q_progress",
+      "question": "What have you done so far?",
+      "options": [
+        "Just have the raw idea",
+        "Created moodboards or initial sketches",
+        "Contacted fabric suppliers or tailors",
+        "Built an audience or social media account"
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### 2.3 Next Action / Clarification Response / Guidance
+Submits clarification answers or requests advice, advancing the agent to determine the ONE clear next move.
+
+- **Method**: `POST`
+- **Path**: `${API_URL}/agent/next`
+- **Headers**: `Content-Type: application/json`
+
+#### Request JSON (`NextRequest`)
+```json
+{
+  "sessionId": "session_clothing_demo",
+  "context": {
+    "idea": "I want to start a clothing brand, but I don't know where to begin",
+    "answers": [
       {
-        "label": "Stripe Webhooks Integration Guide",
-        "url": "https://docs.stripe.com/webhooks",
-        "type": "article"
+        "questionId": "q_budget",
+        "question": "What is your initial budget for testing this clothing brand?",
+        "answer": "₹10,000 – ₹50,000"
+      },
+      {
+        "questionId": "q_customer",
+        "question": "Who is your ideal customer, and what specific aesthetic or problem in their wardrobe are you addressing?",
+        "answer": "College students looking for minimalist linen streetwear that doesn't wrinkle easily."
+      },
+      {
+        "questionId": "q_progress",
+        "question": "What have you done so far?",
+        "answer": "Created moodboards or initial sketches"
       }
     ],
-    "contacts": [
+    "history": []
+  },
+  "answers": [
+    {
+      "questionId": "q_budget",
+      "question": "What is your initial budget for testing this clothing brand?",
+      "answer": "₹10,000 – ₹50,000"
+    },
+    {
+      "questionId": "q_customer",
+      "question": "Who is your ideal customer, and what specific aesthetic or problem in their wardrobe are you addressing?",
+      "answer": "College students looking for minimalist linen streetwear that doesn't wrinkle easily."
+    },
+    {
+      "questionId": "q_progress",
+      "question": "What have you done so far?",
+      "answer": "Created moodboards or initial sketches"
+    }
+  ],
+  "message": "Optional user help question or blocker note"
+}
+```
+
+#### Response JSON (`AgentResponse`) - `200 OK` (Action Ready)
+```json
+{
+  "sessionId": "session_clothing_demo",
+  "status": "action_ready",
+  "stage": "validation",
+  "blocker": "Validating customer willingness to buy before manufacturing inventory",
+  "action": {
+    "id": "act_customer_interviews",
+    "title": "Talk to five potential customers before buying inventory",
+    "reasoning": "Most early clothing brands fail by locking up capital in inventory before confirming that anyone wants their specific aesthetic or fit. Five direct conversations will clarify what shoppers dislike about existing options and what they are eager to pay for.",
+    "steps": [
       {
-        "role": "Stripe Developer Support",
-        "why": "Clarify subscription upgrade retry backoff semantics.",
-        "howToReach": "Stripe Discord #support channel."
+        "id": "step_1",
+        "text": "List 10 people in your network or social circle who match your target customer profile."
+      },
+      {
+        "id": "step_2",
+        "text": "Send the outreach message to ask for a casual 15-minute feedback chat."
+      },
+      {
+        "id": "step_3",
+        "text": "Ask the 5 interview questions without pitching your designs upfront."
+      },
+      {
+        "id": "step_4",
+        "text": "Note recurring complaints about existing brands, pricing comfort, and favorite clothing items."
+      },
+      {
+        "id": "step_5",
+        "text": "Synthesize the feedback into 3 core design and price parameters for your first collection."
+      }
+    ],
+    "estimatedTime": "2–3 hours",
+    "estimatedCost": "₹0",
+    "successCriteria": [
+      "Five completed discovery conversations with target buyers",
+      "Documented list of at least 3 recurring wardrobe frustrations",
+      "Confirmation of preferred price point ranges for your initial category"
+    ],
+    "materials": [
+      {
+        "id": "mat_interview_questions",
+        "kind": "interview_questions",
+        "title": "5 Customer Discovery Interview Questions",
+        "content": "### Customer Discovery Questions\n\nDo not pitch your designs yet. Your goal is to learn their real shopping habits.\n\n1. **Recent Behavior**: What was the last piece of clothing you bought, and where did you find it?\n2. **Frustrations**: What is the most frustrating thing about shopping for this category today?\n3. **Discovery**: How do you usually discover new independent brands?\n4. **Price Benchmark**: How much do you typically spend on this garment?\n5. **Unmet Needs**: If you could change one thing about your favorite current brand, what would it be?"
+      },
+      {
+        "id": "mat_outreach_msg",
+        "kind": "outreach_message",
+        "title": "15-Minute Feedback Outreach Message",
+        "content": "### Direct Message Outreach\n\n> \"Hey [Name]! I'm researching a new clothing concept focused on everyday breathable linen.\n>\n> I'm not selling anything—I'm doing 15-minute research chats to understand what people currently struggle to find in stores.\n>\n> Would you be open to a quick call or coffee this week? I'd love your honest perspective!\""
+      }
+    ]
+  },
+  "message": "Optional reply when a message was sent in NextRequest"
+}
+```
+
+---
+
+### 2.4 Complete Action
+Submits the user's execution outcome ("done" | "partial" | "blocked") along with personal notes, prompting the agent to learn from what happened and synthesize the next move.
+
+- **Method**: `POST`
+- **Path**: `${API_URL}/agent/complete`
+- **Headers**: `Content-Type: application/json`
+
+#### Request JSON (`CompleteRequest`)
+```json
+{
+  "sessionId": "session_clothing_demo",
+  "context": {
+    "idea": "I want to start a clothing brand, but I don't know where to begin",
+    "answers": [],
+    "history": [],
+    "currentAction": {
+      "id": "act_customer_interviews",
+      "title": "Talk to five potential customers before buying inventory",
+      "reasoning": "...",
+      "steps": [],
+      "successCriteria": [],
+      "materials": []
+    }
+  },
+  "actionId": "act_customer_interviews",
+  "outcome": "done",
+  "notes": "Spoke with 5 target customers. They love the breathable linen idea and hate synthetic polyester blends. Expected price point is ₹1,499."
+}
+```
+
+#### Response JSON (`AgentResponse`) - `200 OK` (Next Move Synthesized)
+```json
+{
+  "sessionId": "session_clothing_demo",
+  "status": "action_ready",
+  "stage": "planning",
+  "blocker": "Validating upfront financial commitment before placing fabrication orders",
+  "action": {
+    "id": "act_preorder_page",
+    "title": "Test willingness to pay with a pre-order page",
+    "reasoning": "Based on your customer feedback (\"Spoke with 5 target customers...\"), interest is verified. The next critical move is testing monetary commitment through pre-orders or waitlist deposits before committing to factory minimum order quantities.",
+    "steps": [
+      {
+        "id": "step_c1",
+        "text": "Create a simple one-page pre-order showcase with 3 digital mockups and your price point."
+      },
+      {
+        "id": "step_c2",
+        "text": "Set up a zero-risk deposit or waitlist signup form (e.g. ₹199 reservation)."
+      },
+      {
+        "id": "step_c3",
+        "text": "Share the link privately with the 5 people you interviewed and ask for their commitment."
+      },
+      {
+        "id": "step_c4",
+        "text": "Evaluate whether you hit the pre-order threshold needed to fund your first sample run."
+      }
+    ],
+    "estimatedTime": "3–4 hours",
+    "estimatedCost": "₹0–₹500",
+    "successCriteria": [
+      "Live pre-order landing page with product specifications and price",
+      "At least 3 confirmed pre-orders or deposit reservations secured",
+      "Clear signal on which specific SKU has the highest demand"
+    ],
+    "materials": [
+      {
+        "id": "mat_preorder_template",
+        "kind": "template",
+        "title": "Pre-Order Page Structure & Copy",
+        "content": "### Pre-Order Page Architecture\n\n1. **Hero Headline**: State the specific problem solved.\n2. **Visual Proof**: 3 mockup angles.\n3. **Early-Backer Incentive**: 20% discount on first batch.\n4. **Call to Action**: Reserve size with refundable deposit."
       }
     ]
   }
 }
 ```
 
-#### Response - `200 OK` or `201 Created`
-```json
-{
-  "success": true
-}
-```
-*(or HTTP 204 No Content)*
-
 ---
 
-## 3. Error State Simulation Testing
+## 3. Error Testing Specification
 
-When testing against mock clients or test backends:
-- Any task title containing the substring `"fail"` (case-insensitive) triggers an artificial `Error` or `500 Internal Server Error` response.
-- Chat messages containing `"fail"` trigger stream termination with error.
-- Blocker requests with `"fail"` in taskId or description trigger blocker resolution error.
+For mock clients and backend integration tests:
+- Supplying an `idea` string containing the substring `"fail"` (case-insensitive) triggers an error.
+- Supplying a `notes` or `message` string containing `"fail"` triggers an error.
+- Errors MUST return JSON `{ "error": "Descriptive message" }` with an HTTP status code $\ge 400$.
