@@ -14,6 +14,7 @@ export interface PraxismState {
   context: SessionContext;
   latestResponse: AgentResponse | null;
   _hasHydrated: boolean;
+  checkedSteps: Record<string, boolean>;
 
   setSessionId: (id: string | null) => void;
   setContext: (
@@ -24,6 +25,8 @@ export interface PraxismState {
   addAnswer: (answer: Answer) => void;
   setCurrentAction: (action?: NextAction) => void;
   addCompletedMove: (move: CompletedMove) => void;
+  toggleStep: (stepId: string) => void;
+  setCheckedSteps: (steps: Record<string, boolean>) => void;
   setHasHydrated: (hydrated: boolean) => void;
   startOver: () => void;
 }
@@ -42,6 +45,7 @@ export const usePraxism = create<PraxismState>()(
       context: initialSessionContext,
       latestResponse: null,
       _hasHydrated: false,
+      checkedSteps: {},
 
       setSessionId: (sessionId) => set({ sessionId }),
       setContext: (context) =>
@@ -77,13 +81,23 @@ export const usePraxism = create<PraxismState>()(
             history: [...state.context.history, move],
             currentAction: undefined,
           },
+          checkedSteps: {},
         })),
+      toggleStep: (stepId) =>
+        set((state) => ({
+          checkedSteps: {
+            ...state.checkedSteps,
+            [stepId]: !state.checkedSteps[stepId],
+          },
+        })),
+      setCheckedSteps: (checkedSteps) => set({ checkedSteps }),
       setHasHydrated: (hydrated) => set({ _hasHydrated: hydrated }),
       startOver: () => {
         set({
           sessionId: null,
           context: initialSessionContext,
           latestResponse: null,
+          checkedSteps: {},
         });
         if (typeof window !== "undefined") {
           try {
@@ -104,6 +118,7 @@ export const usePraxism = create<PraxismState>()(
         sessionId: state.sessionId,
         context: state.context,
         latestResponse: state.latestResponse,
+        checkedSteps: state.checkedSteps,
       }),
     }
   )
