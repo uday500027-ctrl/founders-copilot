@@ -1,0 +1,105 @@
+/* Praxism landing page styles. Scoped to .pl-root so they never touch the app pages. */
+
+.pl-root {
+  background: #000;
+  color: #f2f0eb;
+  font-family: var(--pl-font-sans), system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.pl-root ::selection {
+  background: #c8553d;
+  color: #f2f0eb;
+}
+
+.pl-root :focus-visible {
+  outline: 1px solid #c8553d;
+  outline-offset: 2px;
+}
+
+/* Neutralise any app-wide heading styles inside the landing page. */
+.pl-root h1,
+.pl-root h2,
+.pl-root h3 {
+  font-stretch: normal;
+  font-variation-settings: normal;
+}
+
+.pl-display {
+  font-family: var(--pl-font-display), "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  line-height: 0.9;
+  letter-spacing: -0.01em;
+}
+
+.pl-label {
+  font-family: var(--pl-font-mono), ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.pl-mono {
+  font-family: var(--pl-font-mono), ui-monospace, monospace;
+}
+
+.pl-vignette {
+  background: radial-gradient(ellipse at center, oklch(0.12 0 0) 0%, oklch(0 0 0) 70%);
+}
+
+.pl-shell {
+  width: 100%;
+  max-width: 1280px;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+
+@media (min-width: 768px) {
+  .pl-shell {
+    padding-inline: 24px;
+  }
+}
+
+.pl-input {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #1f1f1f;
+  border-radius: 0;
+  outline: none;
+  width: 100%;
+  color: #f2f0eb;
+}
+
+.pl-input:focus {
+  border-bottom-color: #c8553d;
+}
+
+.pl-input::placeholder {
+  color: #555555;
+}
+
+.pl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #c8553d;
+  color: #f2f0eb;
+  border-radius: 2px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: opacity 300ms;
+  cursor: pointer;
+}
+
+.pl-btn:hover {
+  opacity: 0.88;
+}
+
+.pl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
