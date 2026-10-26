@@ -1,67 +1,76 @@
-export type Stage = "idea" | "mvp" | "early_revenue" | "scaling";
+// Praxism data contract. Frontend and backend must both follow this file exactly.
 
-export interface FounderProfile {
-  name: string;
-  startupName: string;
-  oneLiner: string;
-  stage: Stage;
-  industry: string;
-  teamSize: number;
-  hoursPerWeek: number;
-  goal90Days: string;
-  constraints: string[];
-}
+export type Stage =
+  | "idea" | "validation" | "planning" | "building" | "launching" | "growing";
 
-export type TaskStatus = "todo" | "doing" | "done" | "blocked";
+export type SessionStatus = "needs_clarification" | "action_ready" | "error";
 
-export interface Task {
+export interface ClarificationQuestion {
   id: string;
+  question: string;
+  options?: string[]; // if present, show as choices; otherwise free text
+}
+
+export interface ExecutionStep {
+  id: string;
+  text: string;
+}
+
+export interface Material {
+  id: string;
+  kind:
+  | "interview_questions" | "outreach_message" | "checklist"
+  | "template" | "research_summary" | "feedback_analysis";
   title: string;
-  notes?: string;
-  status: TaskStatus;
-  createdAt: string; // ISO date
-}
-
-export interface Resource {
-  label: string;
-  url?: string;
-  type: "tool" | "template" | "article" | "video" | "community";
-}
-
-export interface Contact {
-  role: string;        // e.g. "CA for GST registration", "Incubator mentor"
-  why: string;
-  howToReach?: string; // e.g. "Your incubator's office hours"
+  content: string; // markdown
 }
 
 export interface NextAction {
-  taskId: string;
-  title: string;                                                       // WHAT
-  whyNow: string;                                                      // WHY (builds trust)
-  when: { slot: string; estimatedMinutes: number; deadline?: string }; // WHEN
-  where: string;                                                       // WHERE
-  steps: string[];                                                     // HOW
-  resources: Resource[];                                               // WHAT TO USE
-  contacts: Contact[];                                                 // WHOM TO ASK
-}
-
-export interface QueueItem { taskId: string; title: string; priority: 1 | 2 | 3 | 4 | 5; reason: string; }
-
-export interface PlanRequest { profile: FounderProfile; tasks: Task[]; skippedTaskIds?: string[]; }
-export interface PlanResponse { nextAction: NextAction; queue: QueueItem[]; }
-
-export interface BlockerRequest { profile: FounderProfile; taskId: string; description: string; }
-export interface BlockerResponse { suggestions: string[]; contacts: Contact[]; alternativeAction?: NextAction; }
-
-export interface ChatMessage { role: "user" | "assistant"; content: string; }
-export interface ChatRequest { profile: FounderProfile; currentAction?: NextAction; messages: ChatMessage[]; }
-
-export interface HistoryEntry {
   id: string;
-  taskId: string;
-  title: string;
-  outcome: "done" | "skipped";
-  completedAt: string;  // ISO date
-  action: NextAction;   // snapshot of the advice they followed
-  note?: string;
+  title: string;            // e.g. "Talk to five potential customers"
+  reasoning: string;        // why this matters now
+  steps: ExecutionStep[];
+  estimatedTime?: string;   // e.g. "2–3 hours"
+  estimatedCost?: string;   // e.g. "₹0"
+  successCriteria: string[];
+  materials: Material[];
 }
+
+export interface AgentResponse {
+  sessionId: string;
+  status: SessionStatus;
+  stage: Stage;
+  blocker: string;                     // the main uncertainty right now
+  questions?: ClarificationQuestion[]; // when status = "needs_clarification"
+  action?: NextAction;                 // when status = "action_ready"
+  message?: string;                    // short reply, e.g. to a help request
+}
+
+export interface Answer {
+  questionId: string;
+  question: string;
+  answer: string;
+}
+
+export type Outcome = "done" | "partial" | "blocked";
+
+export interface CompletedMove {
+  action: NextAction;
+  outcome: Outcome;
+  notes: string;       // what happened, in the user's words
+  completedAt: string; // ISO date
+}
+
+// Sent with every request so the backend can stay stateless on Vercel.
+export interface SessionContext {
+  idea: string;
+  answers: Answer[];
+  history: CompletedMove[];
+  currentAction?: NextAction;
+}
+
+export interface StartRequest { idea: string; }
+export interface NextRequest { sessionId: string; context: SessionContext; answers?: Answer[]; message?: string; }
+export interface CompleteRequest { sessionId: string; context: SessionContext; actionId: string; outcome: Outcome; notes: string; }
+export interface HealthResponse { ok: boolean; model?: string; }
+export interface ApiError { error: string; }
